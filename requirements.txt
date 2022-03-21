@@ -1,0 +1,9 @@
+aiodns==3.0.0
+aiofiles==0.8.0
+aiohttp==3.8.1
+coloredlogs==15.0.1
+colorlog==6.6.0
+leancloud==2.9.10
+loguru==0.6.0
+requests==2.27.1
+typing_extensions==4.1.1
