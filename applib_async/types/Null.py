@@ -1,11 +1,11 @@
 """..."""
-import requests
+import aiohttp
 
 
 class Null:
     """表示一个失败的结果"""
 
-    def __init__(self, response: requests.Response):
+    def __init__(self, response: aiohttp.ClientResponse):
         self.response = response
 
     def __repr__(self):
