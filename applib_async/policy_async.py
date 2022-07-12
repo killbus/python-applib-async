@@ -10,7 +10,9 @@ async def policy_async(*args, loop: BaseEventLoop = None, **kwargs):
     if executor is None:
         executor = ThreadPoolExecutor(max_workers=1)
 
-    if not loop:
-        loop = asyncio.get_event_loop()
+    loop = loop or asyncio.get_event_loop()
+    func_loop = kwargs.pop('func_loop', None)
+    if func_loop is not None:
+        kwargs['loop'] = func_loop
 
     return await loop.run_in_executor(executor, partial(*args, **kwargs))
