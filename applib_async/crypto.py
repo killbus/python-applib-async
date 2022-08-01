@@ -6,7 +6,7 @@ import subprocess
 from typing import List, Union, Tuple, IO
 import re
 from zlib import crc32
-from hashlib import md5, sha1
+from hashlib import md5, sha1, sha256
 
 from numpy import Infinity
 
@@ -65,7 +65,6 @@ def calu_crc32_and_md5(stream: IO, chunk_size: int) -> Tuple[int, str]:
             break
     return crc32_v.conjugate() & 0xFFFFFFFF, md5_v.hexdigest()
 
-
 def _sha1_cmd(localpath: str) -> List[str]:
     if IS_MACOS:
         cmd = ["shasum", localpath]
@@ -75,11 +74,20 @@ def _sha1_cmd(localpath: str) -> List[str]:
         cmd = ["CertUtil", "-hashfile", localpath, "SHA1"]
     return cmd
 
+def _sha256_cmd(localpath: str) -> List[str]:
+    if IS_MACOS:
+        cmd = ["sha256sum", localpath]
+    elif IS_LINUX:
+        cmd = ["sha256sum", localpath]
+    else:  # windows
+        cmd = ["CertUtil", "-hashfile", localpath, "SHA256"]
+    return cmd
 
-async def calu_file_sha1(localpath: str) -> str:
+async def _calu_file_sha(localpath: str, sha_type: str = "sha1") -> str:
     """..."""
+    _sha_cmd = _sha1_cmd if sha_type == "sha1" else _sha256_cmd
     cp = await asyncio.create_subprocess_exec(
-            *_sha1_cmd(localpath), universal_newlines=False, stdout=PIPE, stderr=PIPE
+            *_sha_cmd(localpath), universal_newlines=False, stdout=PIPE, stderr=PIPE
         )
 
     stdout, _ = await cp.communicate()
@@ -93,16 +101,40 @@ async def calu_file_sha1(localpath: str) -> str:
         cn = cn.split(":")[-1].strip().replace(" ", "")
         return cn
 
-def _calu_sha1(buf: Union[str, bytes], encoding="utf-8") -> str:
+def _calu_sha(buf: Union[str, bytes], encoding="utf-8", sha_type: str = "sha1") -> str:
     assert isinstance(buf, (str, bytes))
 
     if isinstance(buf, str):
         buf = buf.encode(encoding)
-    return sha1(buf).hexdigest()
+
+    if sha_type == "sha1":
+        return sha1(buf).hexdigest()
+    elif sha_type == "sha256":
+        return sha256(buf).hexdigest()
+    else:
+        raise ValueError("sha_type must be sha1 or sha256")
+
+async def calu_file_sha1(localpath: str) -> str:
+    """..."""
+    return await _calu_file_sha(localpath, sha_type="sha1")
+
+def _calu_sha1(buf: Union[str, bytes], encoding="utf-8") -> str:
+    return _calu_sha(buf, encoding, sha_type="sha1")
 
 async def calu_sha1(buf: Union[str, bytes], encoding="utf-8", loop: BaseEventLoop = None) -> str:
     """..."""
     return await policy_async(_calu_sha1, buf, encoding, loop=loop)
+
+async def calu_file_sha256(localpath: str) -> str:
+    """..."""
+    return await _calu_file_sha(localpath, sha_type="sha256")
+
+def _calu_sha256(buf: Union[str, bytes], encoding="utf-8") -> str:
+    return _calu_sha(buf, encoding, sha_type="sha256")
+
+async def calu_sha256(buf: Union[str, bytes], encoding="utf-8", loop: BaseEventLoop = None) -> str:
+    """..."""
+    return await policy_async(_calu_sha256, buf, encoding, loop=loop)
 
 async def test_infinity_loop():
     while True:
