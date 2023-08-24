@@ -4,38 +4,53 @@ import sys
 from asyncio import IncompleteReadError, LimitOverrunError
 from asyncio.subprocess import PIPE
 from functools import partial
+from typing import Callable, Dict, TextIO
 
 from .platform import IS_WIN
 
 
-async def read_stream_and_display(stream, display):
-    """Read from stream line by line until EOF, display, and capture the lines."""
+async def read_stream_and_display(
+    stream: asyncio.StreamReader, display: Callable, slice: int = 1000
+):
+    """Read from stream line by line until EOF, display, and capture the lines
+    :param slice: -1 to unlimit output."""
     output = []
     while True:
         line = await read_universal_line(stream)
         if not line:
             break
+        # slice ouput ensure it is not too large
+        if slice > -1 and len(output) > slice:
+            output = output[-slice:]
         output.append(line)
         display(line)  # assume it doesn't block
     return b"".join(output)
 
 
-async def read_and_display(cmd, **kwargs):
+async def read_and_display(*cmd, exec_kwargs: Dict = None, output_kwargs: Dict = None):
     """Capture cmd's stdout and stderr while displaying them as they arrive (line by line)."""
     # start process
+
+    exec_kwargs = exec_kwargs or {}
+    output_kwargs = output_kwargs or {}
+
     process = await asyncio.create_subprocess_exec(
-        *cmd, stdout=PIPE, stderr=PIPE, **kwargs
+        *cmd, stdout=PIPE, stderr=PIPE, **exec_kwargs
     )
 
-    def display(stream, output):
+    def display(stream: TextIO, output: bytes):
         stream.buffer.write(output)
         stream.flush()
 
     # Read child's stdout/stderr concurrently (capture and display)
     try:
         stdout, stderr = await asyncio.gather(
-            read_stream_and_display(process.stdout, partial(display, sys.stdout)),
-            read_stream_and_display(process.stderr, partial(display, sys.stderr)),
+            read_stream_and_display(
+                process.stdout, partial(display, sys.stdout), **output_kwargs
+            ),
+            read_stream_and_display(
+                process.stderr, partial(display, sys.stderr), **output_kwargs
+            ),
         )
     except Exception:
         process.kill()
@@ -46,7 +61,7 @@ async def read_and_display(cmd, **kwargs):
     return return_code, stdout, stderr
 
 
-async def read_universal_line(stream):
+async def read_universal_line(stream: asyncio.StreamReader):
     """Read chunk of data from the stream until a newline char '\r' or '\n' is found."""
     separators = b"\r\n"
     try:
@@ -63,7 +78,7 @@ async def read_universal_line(stream):
     return line
 
 
-async def read_until_any_of(stream, separators=b"\n"):
+async def read_until_any_of(stream: asyncio.StreamReader, separators=b"\n"):
     """Read data from the stream until any of the separator chars are found."""
     if len(separators) < 1:
         raise ValueError("separators should be at least one-byte string")
@@ -129,11 +144,20 @@ def subprocess_tee(cmd, **kwargs):
     - but also *do* capture its output so that we can inspect it.
     Returns a tuple of (exit-code, stdout output string, stderr output string).
     """
-    if IS_WIN and not isinstance(
-        asyncio.get_event_loop(), asyncio.ProactorEventLoop
-    ):
-        loop = asyncio.ProactorEventLoop()  # for subprocess' pipes on Windows
-        asyncio.set_event_loop(loop)
+    if sys.version_info[:3] >= (3, 8, 0):
+        if (
+            type(asyncio.get_event_loop_policy())
+            is asyncio.WindowsProactorEventLoopPolicy
+        ):
+            # WindowsProactorEventLoopPolicy is not compatible with tornado 6
+            # fallback to the pre-3.8 default of WindowsSelectorEventLoopPolicy
+            asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+    else:
+        if IS_WIN and not isinstance(
+            asyncio.get_event_loop(), asyncio.ProactorEventLoop
+        ):
+            loop = asyncio.ProactorEventLoop()  # for subprocess' pipes on Windows
+            asyncio.set_event_loop(loop)
 
     return_code, stdout, stderr = asyncio.get_event_loop().run_until_complete(
         read_and_display(cmd, **kwargs)
@@ -141,11 +165,8 @@ def subprocess_tee(cmd, **kwargs):
     return return_code, stdout, stderr
 
 
-
-if __name__ == '__main__':
-
-
+if __name__ == "__main__":
     loop = asyncio.get_event_loop()
-    cmd = ['ls', '/']
+    cmd = ["ls", "/"]
     return_code, stdout, stderr = subprocess_tee(cmd)
     print(return_code, stdout, stderr)
